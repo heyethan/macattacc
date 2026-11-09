@@ -105,10 +105,24 @@ CLI uses swift-argument-parser.
 Point an agent at this repo and it can harden a project. See [SKILL.md](SKILL.md) and
 [AGENTS.md](AGENTS.md).
 
+## Before production
+
+Prefer `.report`. The destructive paths (`.terminate`, `PT_DENY_ATTACH`) are opt-in, early,
+single-maintainer code with no independent security audit. Put real enforcement on a server you
+control (a revocable licence), not on a self-check the binary can be patched to skip.
+
+## What v1 is, honestly
+
+The clone-resistant value is the build hardening, and those are standard Apple Release settings
+packaged into one command: anyone could assemble them from Apple's docs. v1's edge is packaging,
+candor, and macOS-native runtime detection that nothing else ships, not novel capability. The
+differentiated capability (IR obfuscation) is phase 2. The live detectors have integration and
+Mach-port-leak tests (`swift test`), but a determined attacker still bypasses any in-binary check.
+
 ## Status
 
-v1: runtime library, build-hardening presets, CLI. Phase 2: wrap a maintained LLVM obfuscator (e.g.
-Obscura) after a licence audit, and `harden` project editing.
+v1: runtime library, build-hardening presets, CLI, tests. Phase 2: wrap a maintained LLVM obfuscator
+(e.g. Obscura) after a licence audit, and `harden` project editing.
 
 See [docs/DESIGN.md](docs/DESIGN.md), [PRIOR-ART.md](PRIOR-ART.md) (clean-room statement), and
 [DISCLAIMER.md](DISCLAIMER.md).
