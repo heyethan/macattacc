@@ -73,10 +73,43 @@ The unexpected-image check is the noisiest, so it has its own toggle: disable
 deliberately does **not** mutate a user's `.xcodeproj` — auto-editing project files is the riskiest,
 build-breaking surface and is treated as future work, not polish.
 
+## String obfuscation (`MacattaccObfuscation`)
+
+A separate product from `MacOSShield`, so a user can adopt string hiding without pulling in the
+runtime detectors. Two targets:
+
+- **`MacattaccObfuscationMacros` (`.macro`).** A SwiftSyntax compiler plugin providing the
+  freestanding expression macro `#obfuscated("literal") -> String`. At expansion time it reads the
+  static string literal (via `StringLiteralExprSyntax.representedLiteralValue`; interpolation is
+  rejected), XORs its UTF-8 bytes against a **fresh random key of the same length generated during
+  expansion**, and emits a call `MacattaccObfuscation.__obfuscatedDecode([cipher…], [key…])` built
+  from byte-array literals. The plaintext appears in neither the expanded source nor the binary's
+  `__TEXT` string table. A per-literal key means identical strings encode differently at every call
+  site, so you cannot cluster call sites by matching ciphertext.
+- **`MacattaccObfuscation` (library).** Holds the macro declaration plus the tiny runtime decode
+  `__obfuscatedDecode(_:_:)` (XOR is symmetric, so decode is the same operation). Kept in the
+  library, not the plugin, so it ships in the app.
+
+**Why a macro, not a build step.** It is standard SwiftPM — no extra toolchain, no post-link patch,
+no wrapping a third-party obfuscator. It raises the static-scrape bar and is honest about the
+ceiling: the value is decrypted in memory at runtime, so a debugger or memory dump recovers it. It
+is one layer, not a wall. Tests cover expansion (no plaintext in the expansion), runtime round-trip
+(empty/unicode/long), and a strings-absence check that a sentinel passed through `#obfuscated` is
+absent from the compiled test binary.
+
+## Integrity
+
+Integrity is handled by **macOS code signing**, already covered by the signature self-check
+(`checkSignature`, with optional Team ID / designated-requirement pinning) and `shield verify`. We
+deliberately do **not** ship a hand-rolled Mach-O hash baseline: a self-referential baseline is
+unusable (see below), and the OS + a pinned signing identity already answer "is this binary the one
+I shipped, unmodified?" more robustly than an in-binary digest an attacker can patch alongside the code.
+
 ## Phase 2
 
-- Wrap (not rebuild) a maintained LLVM obfuscator (e.g. Obscura) after a licence audit; `harden`
-  project integration.
+- IR-level obfuscation is **not** bundled: the known LLVM obfuscator (Obscura) is PolyForm
+  Noncommercial, so it cannot live in this MIT repo or be used on commercial apps. It stays a
+  non-commercial-only option a user can wire up themselves. `harden` project integration is still open.
 - **Mach-O section hashing** (dropped from v1). Hashing a `__TEXT`/`__DATA_CONST` section and
   comparing against a baked baseline needs a baseline generator plus a post-link patch step to write
   the expected digest after the hash sites are compiled; without that the baseline is self-referential

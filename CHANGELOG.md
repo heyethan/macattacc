@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project aims to follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-09
+
+### Added
+
+- `MacattaccObfuscation`: a compile-time string-literal obfuscator, a separate library product so
+  it can be adopted without the runtime detectors. The freestanding macro `#obfuscated("literal")`
+  XOR-encodes the literal at build time against a per-literal random key, so the plaintext is absent
+  from the expansion and the binary's `__TEXT` string table, and identical strings differ across
+  call sites. Backed by a SwiftSyntax `.macro` target (`MacattaccObfuscationMacros`).
+- Tests: macro-expansion (no plaintext in the expansion), runtime round-trip (empty, unicode, long),
+  and a strings-absence check that a sentinel routed through `#obfuscated` is absent from the
+  compiled test binary.
+
+### Notes
+
+- Honest ceiling: obfuscation defeats naive `strings`/static scraping and raises the static-recovery
+  bar, but a debugger or runtime memory dump still recovers the decrypted value — one layer, not a
+  wall. IR-level obfuscation is not bundled: Obscura is PolyForm Noncommercial, so it cannot ship in
+  this MIT repo or run on commercial apps; it stays a non-commercial-only option.
+- Integrity is handled by macOS code signing (the signature self-check + `shield verify`), not a
+  hand-rolled Mach-O hash baseline.
+
+[0.2.0]: https://github.com/heyethan/macattacc/releases/tag/0.2.0
+
 ## [0.1.0] - 2026-11-09
 
 First tagged release.

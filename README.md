@@ -14,7 +14,7 @@ macattacc packages both so an agent can drop it in and run.
 
 | Threat | What stops it | Where it lives |
 |---|---|---|
-| Cloning your app from the shipped binary (static analysis) | Build hardening and obfuscation: strip symbols, drop reflection metadata, plus (phase 2) IR obfuscation | `shield harden` writes `Shield.xcconfig` |
+| Cloning your app from the shipped binary (static analysis) | Build hardening + obfuscation: strip symbols, drop reflection metadata, and obfuscate string literals | `shield harden` writes `Shield.xcconfig`; `#obfuscated` (the `MacattaccObfuscation` library) |
 | Dynamic tampering: debuggers, licence patches, Frida hooks on a running app | Runtime self-checks (this library), as defense-in-depth | `MacOSShield` / `shield doctor` |
 
 Lead with hardening. The runtime library is defense-in-depth against dynamic tampering and
@@ -52,6 +52,35 @@ Writes `Shield.xcconfig` with the presets (`STRIP_STYLE=all`, `STRIP_INSTALLED_P
 `DEAD_CODE_STRIPPING`, `DEPLOYMENT_POSTPROCESSING`, `SWIFT_REFLECTION_METADATA_LEVEL=without-names`)
 and prints how to adopt it. It does not touch your `.xcodeproj`; you include the xcconfig on your
 Release configuration.
+
+### 1b. Obfuscate string literals (the anti-scrape layer)
+
+Plaintext secrets — licence-server URLs, API endpoints, feature-flag keys — sit in the binary's
+`__TEXT` string table where `strings` dumps them in one command. The `MacattaccObfuscation` library
+is a separate product (adopt it without the runtime detectors) exposing a compile-time macro:
+
+```swift
+.product(name: "MacattaccObfuscation", package: "macattacc")
+```
+
+```swift
+import MacattaccObfuscation
+
+let endpoint = #obfuscated("https://licence.example.com/verify")
+```
+
+`#obfuscated` encodes the literal at build time (XOR with a per-literal random key generated during
+macro expansion) and decodes it at runtime on use. The plaintext never appears in the expanded
+source or the shipped binary, and two identical strings encode differently at each call site.
+
+**Honest limits.** This defeats naive `strings` and static scraping and raises the static-recovery
+bar. It is one layer, not a wall: a debugger or a runtime memory dump still reveals the decrypted
+value, because the app has to decode it to use it. Don't put anything behind it that a server-side
+check should own.
+
+For heavier, IR-level obfuscation, the Obscura LLVM obfuscator is an option **for non-commercial
+projects only** — it is PolyForm Noncommercial licensed, so it is NOT bundled here and cannot be
+used on commercial apps. macattacc stays MIT and commercial-safe.
 
 ### 2. Add the runtime library (defense-in-depth)
 
@@ -119,14 +148,17 @@ control (a revocable licence), not on a self-check the binary can be patched to 
 The clone-resistant value is the build hardening, and those are standard Apple Release settings
 packaged into one command: anyone could assemble them from Apple's docs. v1's edge is packaging,
 candor, and macOS-native runtime detection with no maintained equivalent surfaced in that survey,
-not novel capability. The
-differentiated capability (IR obfuscation) is phase 2. The live detectors have integration and
+not novel capability. Compile-time
+string obfuscation (`#obfuscated`) ships in 0.2.0. The live detectors have integration and
 Mach-port-leak tests (`swift test`), but a determined attacker still bypasses any in-binary check.
 
 ## Status
 
-v1: runtime library, build-hardening presets, CLI, tests. Phase 2: wrap a maintained LLVM obfuscator
-(e.g. Obscura) after a licence audit, and `harden` project editing.
+v1: runtime library, build-hardening presets, CLI, tests. 0.2.0 adds the `#obfuscated` string-literal
+obfuscation macro (MIT, commercial-safe). Integrity is handled by macOS code signing (the signature
+self-check + `shield verify`), not a hand-rolled hash baseline. IR-level obfuscation stays out: the
+known option (Obscura) is PolyForm Noncommercial, so it cannot be bundled in this MIT repo or used on
+commercial apps. Still open: `harden` project editing.
 
 See [docs/DESIGN.md](docs/DESIGN.md), [PRIOR-ART.md](PRIOR-ART.md) (clean-room statement), and
 [DISCLAIMER.md](DISCLAIMER.md).
