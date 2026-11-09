@@ -17,25 +17,25 @@ public enum Detection: Sendable, Equatable {
     /// HIGH false-positive: `gmain`/`gdbus` are stock GLib names in many benign apps.
     case instrumentationThread(name: String)
 
-    /// `DYLD_INSERT_LIBRARIES` was set in the environment. WEAK: the hardened runtime
-    /// already strips this variable, so its absence proves nothing.
+    /// `DYLD_INSERT_LIBRARIES` was set in the environment. Specific-but-weak: benign apps
+    /// rarely set it (so it is NOT high false-positive), but the hardened runtime strips it,
+    /// so its *absence* proves nothing and an attacker can inject by other means.
     case dylibInjectionEnvVar(value: String)
 
     /// A loaded image lives outside system paths and is not on the allowlist.
     /// HIGH false-positive. Report-only, for triage.
     case unexpectedImage(path: String)
 
-    /// The running binary's code signature failed to validate, or its Team ID did
-    /// not match the expected one. High confidence ONLY on a properly signed build.
+    /// The running binary's code signature failed to validate, or its Team ID / designated
+    /// requirement did not match. With `expectedTeamID` and `signatureRequirement` both nil,
+    /// this only proves "signed and unmodified vs its OWN signature" — an attacker who
+    /// re-signs with their own identity passes. Pin a Team ID or requirement for real weight.
     case signatureInvalid(reason: String)
-
-    /// A hashed Mach-O section no longer matches the baked baseline. Off by default.
-    case machOHashMismatch(section: String)
 
     /// Rough triage weight. Not a security guarantee.
     public var severity: Severity {
         switch self {
-        case .debuggerAttached, .signatureInvalid, .machOHashMismatch:
+        case .debuggerAttached, .signatureInvalid:
             return .critical
         case .dylibInjectionEnvVar:
             return .warning
@@ -45,12 +45,14 @@ public enum Detection: Sendable, Equatable {
     }
 
     /// `true` for heuristics that fire on benign software often enough that they must
-    /// never, on their own, gate a `terminate` response. ``Shield`` enforces this.
+    /// never, on their own, gate a `terminate` response. "High-FP" means "fires on benign
+    /// apps" (name/thread/unexpected-image heuristics), NOT "easy to evade". ``Shield``
+    /// enforces that only non-high-FP detections may gate terminate.
     public var isHighFalsePositive: Bool {
         switch self {
-        case .instrumentationImage, .instrumentationThread, .unexpectedImage, .dylibInjectionEnvVar:
+        case .instrumentationImage, .instrumentationThread, .unexpectedImage:
             return true
-        case .debuggerAttached, .signatureInvalid, .machOHashMismatch:
+        case .debuggerAttached, .signatureInvalid, .dylibInjectionEnvVar:
             return false
         }
     }
@@ -64,7 +66,6 @@ public enum Detection: Sendable, Equatable {
         case .dylibInjectionEnvVar(let v):   return "DYLD_INSERT_LIBRARIES set: \(v)"
         case .unexpectedImage(let p):        return "Unexpected image: \(p)"
         case .signatureInvalid(let r):       return "Signature invalid: \(r)"
-        case .machOHashMismatch(let s):      return "Mach-O section changed: \(s)"
         }
     }
 }

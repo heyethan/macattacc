@@ -1,7 +1,6 @@
 import Foundation
 import MachO
 import Security
-import CryptoKit
 import CShieldShim
 
 /// Live detectors: they read real process state and feed `Heuristics` for the
@@ -11,18 +10,8 @@ enum Detectors {
 
     // MARK: Debugger
 
-    static func debugger(policy: ShieldPolicy) -> [Detection] {
-        var out: [Detection] = []
-        if shield_is_being_traced() {
-            out.append(.debuggerAttached(method: "sysctl P_TRACED"))
-        }
-        if policy.enablePtraceDenyAttach {
-            // Side-effect hardening. SIGSEGVs if a debugger is already attached — by then
-            // the sysctl check above has already run, so a report still happens first when
-            // the host app wraps scan() appropriately. Return value ignored by design.
-            _ = shield_deny_attach()
-        }
-        return out
+    static func debugger() -> [Detection] {
+        shield_is_being_traced() ? [.debuggerAttached(method: "sysctl P_TRACED")] : []
     }
 
     // MARK: Loaded images
@@ -45,11 +34,32 @@ enum Detectors {
             .map { .instrumentationImage(name: $0) }
     }
 
+    /// Resolve a path through `realpath(3)`, falling back to the original path when the
+    /// file has no on-disk entry (most `/usr/lib` and `/System` dylibs live only in the
+    /// dyld shared cache). Resolving collapses `/var` vs `/private/var` and symlinks.
+    static func resolveRealPath(_ path: String) -> String {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX))
+        guard realpath(path, &buffer) != nil else { return path }
+        return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+    }
+
     static func unexpectedImages(allowlist: [String]) -> [Detection] {
-        let main = Bundle.main.executablePath
-        return loadedImagePaths()
-            .filter { Heuristics.isUnexpectedImage($0, mainExecutablePath: main, allowlist: allowlist) }
-            .map { .unexpectedImage(path: $0) }
+        let mainReal = Bundle.main.executablePath.map(resolveRealPath)
+        let contentsReal = resolveRealPath(
+            Bundle.main.bundleURL.appendingPathComponent("Contents", isDirectory: true).path
+        ) + "/"
+        return loadedImagePaths().compactMap { path in
+            // Fast pre-filter: skip realpath for OS-shipped images (the vast majority).
+            if Heuristics.isSystemImage(path) { return nil }
+            let real = resolveRealPath(path)
+            guard Heuristics.isUnexpectedImage(
+                real,
+                mainExecutableRealPath: mainReal,
+                mainBundleContentsPrefix: contentsReal,
+                allowlist: allowlist
+            ) else { return nil }
+            return .unexpectedImage(path: real)
+        }
     }
 
     // MARK: Mach thread names
@@ -62,7 +72,7 @@ enum Detectors {
             return []
         }
         defer {
-            // Free every port, then the array itself — or it leaks (Fable's note).
+            // Free every port, then the array itself — or it leaks.
             for i in 0..<Int(count) {
                 mach_port_deallocate(mach_task_self_, threads[i])
             }
@@ -99,7 +109,7 @@ enum Detectors {
 
     // MARK: Code signature self-check
 
-    static func signature(expectedTeamID: String?) -> [Detection] {
+    static func signature(expectedTeamID: String?, requirementString: String? = nil) -> [Detection] {
         var codeRef: SecCode?
         guard SecCodeCopySelf(SecCSFlags(), &codeRef) == errSecSuccess, let codeRef else {
             return [.signatureInvalid(reason: "SecCodeCopySelf failed")]
@@ -109,7 +119,24 @@ enum Detectors {
               let staticRef else {
             return [.signatureInvalid(reason: "SecCodeCopyStaticCode failed")]
         }
-        let status = SecStaticCodeCheckValidity(staticRef, SecCSFlags(), nil)
+
+        // Validate every architecture, descend into nested code (frameworks, plugins, helper
+        // tools), and reject the designated-requirement shortcuts Gatekeeper allows.
+        let checkFlags = SecCSFlags(
+            rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate
+        )
+
+        // Optional designated requirement (e.g. `anchor apple generic and ...`). A malformed
+        // string is surfaced, never silently ignored.
+        var requirement: SecRequirement?
+        if let reqStr = requirementString {
+            let created = SecRequirementCreateWithString(reqStr as CFString, SecCSFlags(), &requirement)
+            guard created == errSecSuccess, requirement != nil else {
+                return [.signatureInvalid(reason: "invalid designated requirement (status \(created))")]
+            }
+        }
+
+        let status = SecStaticCodeCheckValidity(staticRef, checkFlags, requirement)
 
         var actualTeamID: String?
         if expectedTeamID != nil {
@@ -125,34 +152,11 @@ enum Detectors {
             status: status,
             errSecCSUnsigned: OSStatus(errSecCSUnsigned),
             expectedTeamID: expectedTeamID,
-            actualTeamID: actualTeamID
+            actualTeamID: actualTeamID,
+            requirementPinned: requirementString != nil
         ) {
             return [detection]
         }
         return []
-    }
-
-    // MARK: Mach-O section hashing (optional, off by default)
-
-    /// Lowercase hex SHA-256 of a segment in the main executable, or `nil` if absent.
-    /// Hash only `__TEXT` / `__DATA_CONST` (stable, read-only under signing).
-    static func sectionHash(segment: String) -> String? {
-        guard let header = _dyld_get_image_header(0) else { return nil }
-        var size: UInt = 0
-        // getsegmentdata wants mach_header_64 on 64-bit; _dyld_get_image_header gives mach_header.
-        let data = header.withMemoryRebound(to: mach_header_64.self, capacity: 1) { h64 in
-            segment.withCString { getsegmentdata(h64, $0, &size) }
-        }
-        guard let data, size > 0 else { return nil }
-        let buffer = UnsafeRawBufferPointer(start: data, count: Int(size))
-        let digest = SHA256.hash(data: Data(buffer))
-        return digest.map { String(format: "%02x", $0) }.joined()
-    }
-
-    static func machOHash(baseline: [String: String]) -> [Detection] {
-        baseline.compactMap { segment, expected in
-            let actual = sectionHash(segment: segment)
-            return actual == expected ? nil : .machOHashMismatch(section: segment)
-        }
     }
 }

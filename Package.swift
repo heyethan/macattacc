@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "macos-shield",
+    name: "macattacc",
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "MacOSShield", targets: ["MacOSShield"]),
@@ -27,7 +27,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacOSShieldTests",
-            dependencies: ["MacOSShield"]
+            dependencies: ["MacOSShield", "shield"]
         ),
     ],
     swiftLanguageModes: [.v6]

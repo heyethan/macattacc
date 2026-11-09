@@ -4,8 +4,8 @@ import Darwin
 
 /// Integration smoke tests for the live detectors (Detectors.swift). The unit tests cover the pure
 /// matching logic in Heuristics; these exercise the real process-state paths — the ones that can
-/// leak Mach ports or crash in the field (task_threads cleanup, getsegmentdata rebind). They assert
-/// structural sanity, not the presence/absence of a debugger (CI may or may not run under one).
+/// leak Mach ports or crash in the field (task_threads cleanup). They assert structural sanity, not
+/// the presence/absence of a debugger (CI may or may not run under one).
 final class LiveDetectorsTests: XCTestCase {
 
     func testScanDoesNotCrashAndIsRepeatable() {
@@ -30,7 +30,7 @@ final class LiveDetectorsTests: XCTestCase {
     }
 
     func testEveryLiveDetectorIsCallable() {
-        _ = Detectors.debugger(policy: ShieldPolicy())      // ptrace stays off (default policy)
+        _ = Detectors.debugger()
         _ = Detectors.instrumentationImages()
         _ = Detectors.instrumentationThreads()
         _ = Detectors.unexpectedImages(allowlist: [])
@@ -38,14 +38,37 @@ final class LiveDetectorsTests: XCTestCase {
         _ = Detectors.signature(expectedTeamID: nil)        // ad-hoc/unsigned test build: must not be fatal
     }
 
-    func testSectionHashIsStableHex() {
-        guard let a = Detectors.sectionHash(segment: "__TEXT") else {
-            return XCTFail("__TEXT segment hash should be present in the running binary")
+    /// realpath resolves a symlink to its target; a nonexistent path falls back to itself
+    /// (dyld-shared-cache images have no on-disk file).
+    func testResolveRealPathResolvesSymlinkAndFallsBack() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("macattacc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let target = dir.appendingPathComponent("target")
+        try "x".write(to: target, atomically: true, encoding: .utf8)
+        let link = dir.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        XCTAssertEqual(Detectors.resolveRealPath(link.path), Detectors.resolveRealPath(target.path))
+        XCTAssertEqual(Detectors.resolveRealPath("/no/such/file/xyz"), "/no/such/file/xyz")
+    }
+
+    /// A malformed `signatureRequirement` is reported as exactly one `.signatureInvalid`
+    /// (reason prefixed "invalid designated requirement"), and the process survives —
+    /// covering the requirement path and giving a non-empty report-returns-detections case.
+    func testSignatureRequirementMalformedIsReportedNotFatal() {
+        var policy = ShieldPolicy(
+            checkDebugger: false, checkInstrumentationImages: false,
+            checkInstrumentationThreads: false, checkUnexpectedImages: false,
+            checkDylibInjection: false, checkSignature: true)
+        policy.signatureRequirement = "this is not a valid requirement"
+        let detections = Shield.scan(policy)
+        XCTAssertEqual(detections.count, 1)
+        guard case let .signatureInvalid(reason) = detections.first else {
+            return XCTFail("expected signatureInvalid, got \(String(describing: detections.first))")
         }
-        XCTAssertEqual(a.count, 64)
-        XCTAssertTrue(a.allSatisfy { $0.isHexDigit })
-        XCTAssertEqual(a, Detectors.sectionHash(segment: "__TEXT"), "same binary, same hash")
-        XCTAssertNil(Detectors.sectionHash(segment: "__NO_SUCH_SEG"))
+        XCTAssertTrue(reason.hasPrefix("invalid designated requirement"), "got \(reason)")
     }
 
     /// The thread scan allocates a thread_act array plus a send right per thread; both must be freed.

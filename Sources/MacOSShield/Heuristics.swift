@@ -13,11 +13,12 @@ public enum Heuristics {
         (pFlag & pTraced) != 0
     }
 
-    /// Image basenames that signal dynamic instrumentation. Matched as case-insensitive
-    /// substrings of the full image path. HIGH false-positive by nature.
+    /// Marker tokens that signal dynamic instrumentation. Matched against the image
+    /// **basename's** tokens (not a substring of the full path), so the shield CLI's own
+    /// `libswiftArgumentParser.dylib` is not flagged just because "argument" contains "gum".
+    /// HIGH false-positive by nature even so (benign frameworks can share a token).
     static let instrumentationImageMarkers = [
-        "frida", "frida-agent", "frida-gadget", "libgadget",
-        "gum", "cynject", "substrate", "substitute", "libhooker",
+        "frida", "gadget", "gum", "cynject", "substrate", "substitute", "hooker",
     ]
 
     /// Mach thread names used by instrumentation workers. `gmain`/`gdbus` are included
@@ -26,9 +27,42 @@ public enum Heuristics {
         "gum-js-loop", "gmain", "gdbus", "pool-frida", "frida",
     ]
 
+    /// Split an image path's basename into lowercased tokens, breaking on non-alphanumeric
+    /// separators (`.`, `-`, `_`) and camelCase boundaries. `FridaGadget.dylib` →
+    /// `["frida", "gadget", "dylib"]`; `libswiftArgumentParser.dylib` →
+    /// `["libswift", "argument", "parser", "dylib"]`.
+    static func imageBasenameTokens(_ path: String) -> [String] {
+        let base = (path as NSString).lastPathComponent
+        var tokens: [String] = []
+        var current = ""
+        var prevIsLower = false
+        for ch in base {
+            if ch.isLetter || ch.isNumber {
+                if ch.isUppercase, prevIsLower, !current.isEmpty {
+                    tokens.append(current)
+                    current = ""
+                }
+                current.append(ch)
+                prevIsLower = ch.isLowercase
+            } else {
+                if !current.isEmpty { tokens.append(current); current = "" }
+                prevIsLower = false
+            }
+        }
+        if !current.isEmpty { tokens.append(current) }
+        return tokens.map { $0.lowercased() }
+    }
+
     public static func matchesInstrumentationImage(_ path: String) -> Bool {
-        let lower = path.lowercased()
-        return instrumentationImageMarkers.contains { lower.contains($0) }
+        // Match a marker only if it equals a whole basename token, or a token with a
+        // leading "lib" stripped (so `libsubstrate` → `substrate`). Never a loose substring.
+        let tokens = imageBasenameTokens(path)
+        let candidates: Set<String> = Set(tokens.flatMap { token -> [String] in
+            token.count > 3 && token.hasPrefix("lib")
+                ? [token, String(token.dropFirst(3))]
+                : [token]
+        })
+        return instrumentationImageMarkers.contains { candidates.contains($0) }
     }
 
     public static func matchesInstrumentationThread(_ name: String) -> Bool {
@@ -41,16 +75,28 @@ public enum Heuristics {
         "/usr/lib/", "/System/", "/Library/Apple/",
     ]
 
-    /// True if an image path is NOT a system image, NOT the main executable, and NOT
-    /// covered by the caller's allowlist — i.e. worth surfacing for triage.
+    /// True if a path is OS-shipped (used as a fast pre-filter before `realpath`).
+    public static func isSystemImage(_ path: String) -> Bool {
+        systemImagePrefixes.contains { path.hasPrefix($0) }
+    }
+
+    /// True if an image path is worth surfacing for triage: NOT a system image, NOT the
+    /// main executable, NOT inside the main bundle's own `Contents/` subtree, and NOT
+    /// covered by the caller's allowlist.
+    ///
+    /// All path arguments must already be `realpath`-resolved by the caller so that
+    /// `/var` vs `/private/var` and symlinks do not produce phantom mismatches; see
+    /// `Detectors.unexpectedImages`.
     public static func isUnexpectedImage(
-        _ path: String,
-        mainExecutablePath: String?,
+        _ resolvedPath: String,
+        mainExecutableRealPath: String?,
+        mainBundleContentsPrefix: String?,
         allowlist: [String]
     ) -> Bool {
-        if let main = mainExecutablePath, path == main { return false }
-        if systemImagePrefixes.contains(where: { path.hasPrefix($0) }) { return false }
-        let lower = path.lowercased()
+        if let main = mainExecutableRealPath, resolvedPath == main { return false }
+        if let contents = mainBundleContentsPrefix, resolvedPath.hasPrefix(contents) { return false }
+        if isSystemImage(resolvedPath) { return false }
+        let lower = resolvedPath.lowercased()
         if allowlist.contains(where: { lower.contains($0.lowercased()) }) { return false }
         return true
     }
@@ -64,9 +110,22 @@ public enum Heuristics {
         errSecSuccess: OSStatus = 0,
         errSecCSUnsigned: OSStatus = -67062,
         expectedTeamID: String?,
-        actualTeamID: String?
+        actualTeamID: String?,
+        requirementPinned: Bool = false
     ) -> Detection? {
-        if status == errSecCSUnsigned { return nil }
+        if status == errSecCSUnsigned {
+            // "Not meaningful" on debug/ad-hoc builds — unless the caller pinned a Team ID
+            // or a designated requirement, which an unsigned binary cannot satisfy (e.g. a
+            // stripped x86_64 re-sign). Must be caught here: an unsigned binary never reaches
+            // the requirement status below.
+            if let expected = expectedTeamID {
+                return .signatureInvalid(reason: "unsigned, expected Team ID \(expected)")
+            }
+            if requirementPinned {
+                return .signatureInvalid(reason: "unsigned, expected a designated requirement")
+            }
+            return nil
+        }
         if status != errSecSuccess {
             return .signatureInvalid(reason: "SecStaticCodeCheckValidity status \(status)")
         }
