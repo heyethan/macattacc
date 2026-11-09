@@ -29,14 +29,64 @@ final class ObfuscationTests: XCTestCase {
         XCTAssertTrue(rendered.contains("__obfuscatedDecode"), "expansion should call the runtime decode")
     }
 
-    /// The codec is symmetric (XOR), and a per-literal random key means identical inputs
-    /// encode to different ciphertext across call sites.
+    private func decode(_ e: ObfuscatedCodec.Encoded) -> String {
+        __obfuscatedDecode(e.cipher, e.salt, e.seedMasked, e.mask)
+    }
+
+    /// The codec round-trips (key is re-derived, not stored), and a per-call-site salt means
+    /// identical inputs encode to different ciphertext across call sites.
     func testCodecRoundTripAndPerLiteralKey() {
         let a = ObfuscatedCodec.encode("repeat")
         let b = ObfuscatedCodec.encode("repeat")
         XCTAssertNotEqual(a.cipher, b.cipher, "identical strings must encode differently")
-        XCTAssertEqual(__obfuscatedDecode(a.cipher, a.key), "repeat")
-        XCTAssertEqual(__obfuscatedDecode(b.cipher, b.key), "repeat")
+        XCTAssertEqual(decode(a), "repeat")
+        XCTAssertEqual(decode(b), "repeat")
+    }
+
+    /// Parse the `[0x.., 0x.., ...]` byte-array literals out of a rendered expansion.
+    private func byteArrays(in rendered: String) -> [[UInt8]] {
+        var arrays: [[UInt8]] = []
+        var scalars = Substring(rendered)
+        while let open = scalars.firstIndex(of: "["),
+              let close = scalars[open...].firstIndex(of: "]") {
+            let body = scalars[scalars.index(after: open)..<close]
+            let bytes = body.split(separator: ",").compactMap { tok -> UInt8? in
+                let t = tok.trimmingCharacters(in: .whitespaces)
+                guard t.hasPrefix("0x") else { return nil }
+                return UInt8(t.dropFirst(2), radix: 16)
+            }
+            if !bytes.isEmpty { arrays.append(bytes) }
+            scalars = scalars[scalars.index(after: close)...]
+        }
+        return arrays
+    }
+
+    /// The raw per-literal key must NOT travel next to the cipher: the expansion emits
+    /// cipher + salt + masked seed + mask, and the key is derived at runtime. So (a) the true
+    /// key (plain ^ cipher) appears in no emitted array, and (b) no array other than the
+    /// cipher itself has the cipher's length — there is no adjacent full-length key to scrape.
+    func testExpansionStoresNoRawKeyAdjacentToCipher() throws {
+        let plaintext = "adjacent-key-recovery-check"   // 27 bytes: != salt(16), != seed/mask(32)
+        let plain = Array(plaintext.utf8)
+        let node = try XCTUnwrap(
+            ExprSyntax("#obfuscated(\"\(raw: plaintext)\")").as(MacroExpansionExprSyntax.self)
+        )
+        let expanded = try ObfuscatedMacro.expansion(of: node, in: BasicMacroExpansionContext())
+        let rendered = expanded.description
+
+        XCTAssertFalse(rendered.contains(plaintext), "plaintext leaked: \(rendered)")
+
+        let arrays = byteArrays(in: rendered)
+        let cipher = try XCTUnwrap(arrays.first)
+        XCTAssertEqual(cipher.count, plain.count)
+
+        // (a) the real key never appears verbatim as an emitted array.
+        let rawKey = zip(plain, cipher).map { $0 ^ $1 }
+        XCTAssertFalse(arrays.contains(rawKey), "raw key found adjacent to cipher")
+
+        // (b) only one emitted array has the cipher's length (the cipher).
+        XCTAssertEqual(arrays.filter { $0.count == cipher.count }.count, 1,
+                       "a second full-length array sits next to the cipher: \(arrays.map(\.count))")
     }
 
     // MARK: runtime round-trip
