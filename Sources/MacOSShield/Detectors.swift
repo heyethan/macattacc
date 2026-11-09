@@ -3,6 +3,59 @@ import MachO
 import Security
 import CShieldShim
 
+/// The single hardened code-signature validation path. Shared by the library self-check
+/// (`Detectors.signature`, via `SecCodeCopySelf`) and the CLI `shield check` (a bundle on
+/// disk, via `SecStaticCodeCreateWithPath`), so a hand-run `check` is exactly as strict as
+/// the in-app self-check: strict + all-architectures + nested-code flags, with an optional
+/// designated requirement and Team ID pin.
+public enum SignatureCheck {
+    /// Validate every architecture, descend into nested code (frameworks, plugins, helper
+    /// tools), and reject the designated-requirement shortcuts Gatekeeper allows. Using the
+    /// bare `SecCSFlags()` default here would let a re-signed/stripped slice or an
+    /// unvalidated nested helper slip through.
+    public static let hardenedFlags = SecCSFlags(
+        rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate
+    )
+
+    /// Run the hardened validity check on an already-created `SecStaticCode`, mapping the
+    /// result to a `Detection` (`nil` == valid, or legitimately unsigned-and-unpinned).
+    public static func evaluate(
+        _ staticCode: SecStaticCode,
+        expectedTeamID: String?,
+        requirementString: String?
+    ) -> Detection? {
+        // Optional designated requirement (e.g. `anchor apple generic and ...`). A malformed
+        // string is surfaced, never silently ignored.
+        var requirement: SecRequirement?
+        if let reqStr = requirementString {
+            let created = SecRequirementCreateWithString(reqStr as CFString, SecCSFlags(), &requirement)
+            guard created == errSecSuccess, requirement != nil else {
+                return .signatureInvalid(reason: "invalid designated requirement (status \(created))")
+            }
+        }
+
+        let status = SecStaticCodeCheckValidity(staticCode, hardenedFlags, requirement)
+
+        var actualTeamID: String?
+        if expectedTeamID != nil {
+            var info: CFDictionary?
+            let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+            if SecCodeCopySigningInformation(staticCode, flags, &info) == errSecSuccess,
+               let dict = info as? [String: Any] {
+                actualTeamID = dict[kSecCodeInfoTeamIdentifier as String] as? String
+            }
+        }
+
+        return Heuristics.mapSignatureStatus(
+            status: status,
+            errSecCSUnsigned: OSStatus(errSecCSUnsigned),
+            expectedTeamID: expectedTeamID,
+            actualTeamID: actualTeamID,
+            requirementPinned: requirementString != nil
+        )
+    }
+}
+
 /// Live detectors: they read real process state and feed `Heuristics` for the
 /// matching decisions. These are the "live-only" paths — unit tests exercise the
 /// pure logic in `Heuristics`, not these.
@@ -120,40 +173,9 @@ enum Detectors {
             return [.signatureInvalid(reason: "SecCodeCopyStaticCode failed")]
         }
 
-        // Validate every architecture, descend into nested code (frameworks, plugins, helper
-        // tools), and reject the designated-requirement shortcuts Gatekeeper allows.
-        let checkFlags = SecCSFlags(
-            rawValue: kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate
-        )
-
-        // Optional designated requirement (e.g. `anchor apple generic and ...`). A malformed
-        // string is surfaced, never silently ignored.
-        var requirement: SecRequirement?
-        if let reqStr = requirementString {
-            let created = SecRequirementCreateWithString(reqStr as CFString, SecCSFlags(), &requirement)
-            guard created == errSecSuccess, requirement != nil else {
-                return [.signatureInvalid(reason: "invalid designated requirement (status \(created))")]
-            }
-        }
-
-        let status = SecStaticCodeCheckValidity(staticRef, checkFlags, requirement)
-
-        var actualTeamID: String?
-        if expectedTeamID != nil {
-            var info: CFDictionary?
-            let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
-            if SecCodeCopySigningInformation(staticRef, flags, &info) == errSecSuccess,
-               let dict = info as? [String: Any] {
-                actualTeamID = dict[kSecCodeInfoTeamIdentifier as String] as? String
-            }
-        }
-
-        if let detection = Heuristics.mapSignatureStatus(
-            status: status,
-            errSecCSUnsigned: OSStatus(errSecCSUnsigned),
-            expectedTeamID: expectedTeamID,
-            actualTeamID: actualTeamID,
-            requirementPinned: requirementString != nil
+        // Same hardened validity path the CLI `check` runs.
+        if let detection = SignatureCheck.evaluate(
+            staticRef, expectedTeamID: expectedTeamID, requirementString: requirementString
         ) {
             return [detection]
         }

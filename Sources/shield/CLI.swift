@@ -29,6 +29,9 @@ struct Check: ParsableCommand {
     @Option(help: "Expected Team ID; reports a mismatch if given.")
     var teamID: String?
 
+    @Option(help: "Designated requirement to pin (e.g. 'anchor apple generic and ...').")
+    var requirement: String?
+
     func run() throws {
         let url = URL(fileURLWithPath: path)
         var staticCode: SecStaticCode?
@@ -38,13 +41,13 @@ struct Check: ParsableCommand {
             throw ExitCode.failure
         }
 
-        let status = SecStaticCodeCheckValidity(staticCode, SecCSFlags(), nil)
-        if status == errSecCSUnsigned {
-            print("UNSIGNED  \(path) has no code signature (debug/ad-hoc build?)")
-            return
-        }
-        if status != errSecSuccess {
-            print("FAIL  signature invalid (status \(status))")
+        // The SAME hardened validity path as the in-app self-check (strict + all-arch +
+        // nested code, optional requirement / Team ID) — not the bare `SecCSFlags()` check.
+        let detection = SignatureCheck.evaluate(
+            staticCode, expectedTeamID: teamID, requirementString: requirement
+        )
+        if let detection, case let .signatureInvalid(reason) = detection {
+            print("FAIL  \(reason)")
             throw ExitCode.failure
         }
 
@@ -54,9 +57,11 @@ struct Check: ParsableCommand {
         let team = dict?[kSecCodeInfoTeamIdentifier as String] as? String ?? "(none)"
         let ident = dict?[kSecCodeInfoIdentifier as String] as? String ?? "(none)"
 
-        if let expected = teamID, team != expected {
-            print("FAIL  Team ID \(team) != expected \(expected)")
-            throw ExitCode.failure
+        // `evaluate` returns nil for a valid signature OR a legitimately unsigned,
+        // unpinned binary; the missing identifier distinguishes the latter.
+        if ident == "(none)" {
+            print("UNSIGNED  \(path) has no code signature (debug/ad-hoc build?)")
+            return
         }
         print("OK    signature valid — identifier=\(ident) teamID=\(team)")
     }

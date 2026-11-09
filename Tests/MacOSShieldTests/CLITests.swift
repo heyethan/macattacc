@@ -15,6 +15,12 @@ final class CLITests: XCTestCase {
         XCTAssertEqual(check.teamID, "ABC123")
     }
 
+    func testParseCheckWithRequirement() throws {
+        let cmd = try ShieldCLI.parseAsRoot(["check", "/Apps/X.app", "--requirement", "anchor apple generic"])
+        let check = try XCTUnwrap(cmd as? Check)
+        XCTAssertEqual(check.requirement, "anchor apple generic")
+    }
+
     func testParseHardenForceFlag() throws {
         let plain = try XCTUnwrap(try ShieldCLI.parseAsRoot(["harden", "/tmp"]) as? Harden)
         XCTAssertFalse(plain.force)
