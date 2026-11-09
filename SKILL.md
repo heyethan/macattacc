@@ -45,13 +45,14 @@ for d in detections where !d.isHighFalsePositive { /* act on real signals only *
 ```
 
 `ShieldPolicy` knobs: `onDetection` (`.report`/`.callback`/`.terminate`), `expectedTeamID`,
-`imageAllowlist`, `enablePtraceDenyAttach` (OFF — has crash-telemetry/notarization costs),
-`checkMachOHash` (OFF — fragile under re-signing).
+`signatureRequirement`, `imageAllowlist`, `enablePtraceDenyAttach` (OFF — has
+crash-telemetry/notarization costs), and per-detector toggles
+(`checkInstrumentationImages`/`checkInstrumentationThreads`/`checkUnexpectedImages`, etc.).
 
 ## Rules when applying this
 
 1. Lead with `harden`. Present the runtime library as defense-in-depth only.
 2. Keep `onDetection` on `.report` unless the user explicitly asks to terminate, and explain that
-   high-FP heuristics (image/thread names, env var) never gate terminate alone.
+   high-FP heuristics (image/thread names, unexpected images) never gate terminate alone.
 3. Do not enable `PT_DENY_ATTACH` for anything App-Store-bound; warn about lost crash telemetry.
 4. This is for software the user owns. See DISCLAIMER.md.

@@ -6,8 +6,9 @@ presets, an opt-in runtime tamper-detection library, and a drop-in CLI. MIT lice
 > Protect your own software. This is defensive developer tooling. See [DISCLAIMER.md](DISCLAIMER.md).
 
 The runtime self-protection suites (IOSSecuritySuite, freeRASP) are iOS/Android only, and the macOS
-obfuscators (SwiftShield, Hikari) are dead or archived. macattacc combines macOS-native runtime
-protection with build hardening in a package an agent can drop in and run.
+obfuscators (SwiftShield, Hikari) are dead or archived. No maintained macOS-native equivalent that
+combines runtime protection with build hardening surfaced in a 2026-11-08 survey (not exhaustive);
+macattacc packages both so an agent can drop it in and run.
 
 ## Two threats, two defenses (read this first)
 
@@ -33,7 +34,10 @@ Specifics:
   are report-only and can never alone trigger a terminate.
 - `DYLD_INSERT_LIBRARIES` is already stripped under the hardened runtime, so that detector is weak.
 - The signature self-check is only meaningful on a properly signed build. Debug and ad-hoc builds
-  report `errSecCSUnsigned`, which is not treated as a failure.
+  report `errSecCSUnsigned`, which is not treated as a failure. With `expectedTeamID` and
+  `signatureRequirement` both nil it only proves "signed and unmodified vs its *own* signature" — an
+  attacker who re-signs with their own identity passes it. Pin a Team ID or a designated requirement
+  for that check to carry weight.
 - `PT_DENY_ATTACH` has real costs (below) and is off by default.
 
 ## Quickstart
@@ -92,7 +96,6 @@ swift run shield check /Applications/YourApp.app --team-id YOURTEAMID
   (blocks `sample`, Instruments, the crash reporter), can look like a crash on MDM/EDR-managed Macs,
   and risks notarization review. Never enable it for an App-Store-bound build. It also SIGSEGVs if a
   debugger is already attached.
-- The 27042 Frida port probe was dropped from v1 (high false-positive, needs a network entitlement).
 - Set `ShieldPolicy.imageAllowlist` for your own frameworks.
 
 ## Requirements
@@ -115,7 +118,8 @@ control (a revocable licence), not on a self-check the binary can be patched to 
 
 The clone-resistant value is the build hardening, and those are standard Apple Release settings
 packaged into one command: anyone could assemble them from Apple's docs. v1's edge is packaging,
-candor, and macOS-native runtime detection that nothing else ships, not novel capability. The
+candor, and macOS-native runtime detection with no maintained equivalent surfaced in that survey,
+not novel capability. The
 differentiated capability (IR obfuscation) is phase 2. The live detectors have integration and
 Mach-port-leak tests (`swift test`), but a determined attacker still bypasses any in-binary check.
 

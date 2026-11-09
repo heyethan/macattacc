@@ -35,10 +35,11 @@ code was not used:
   was deliberately **not** opened, so that this MIT project carries no GPL-derived material.
 - **Hikari** (archived) — an LLVM-based obfuscator fork.
 - **IOSSecuritySuite / freeRASP** — iOS/Android runtime self-protection suites; the inspiration for
-  a *macOS-native* equivalent, which did not exist.
+  a *macOS-native* equivalent, for which no maintained project surfaced in the survey below.
 
-The gap (survey 2026-11-08): nothing combines macOS-native runtime tamper detection with packaged
-build-hardening presets as an agent-droppable tool. That is what this project is.
+The gap: no maintained macOS-native equivalent combining runtime tamper detection with packaged
+build-hardening presets as an agent-droppable tool surfaced in a 2026-11-08 survey (not exhaustive).
+That is the niche this project fills.
 
 ## Licence
 

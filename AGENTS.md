@@ -8,7 +8,7 @@ runtime tamper detection — without breaking their build or overstating what it
 - `Package.swift` — SwiftPM, macOS 13+, Swift 6. Targets: `CShieldShim` (C syscalls), `MacOSShield`
   (library), `shield` (CLI), tests.
 - Entry points: `Sources/MacOSShield/Shield.swift` (`Shield.scan(_:)`), `Sources/shield/CLI.swift`.
-- Read `README.md` "What actually raises the bar" and "Honest limits" before you advise the user.
+- Read `README.md` "Two threats, two defenses" and "Honest limits" before you advise the user.
 
 ## Build / test (always verify)
 

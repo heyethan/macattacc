@@ -27,33 +27,45 @@ syscall. We say so everywhere. The runtime half is never labelled anti-clone.
 
 ## Detectors
 
-| Detector | Mechanism | Confidence | Default |
-|---|---|---|---|
-| Debugger | sysctl `P_TRACED` | high | on, report |
-| `PT_DENY_ATTACH` | `ptrace(31)` | prevention | **off** |
-| Instrumentation image | `_dyld_*` image enum vs markers | high-FP | on, report |
-| Instrumentation thread | `task_threads` + `pthread_getname_np` | high-FP | on, report |
-| Unexpected image | allowlist diff vs system/main/allowlist | high-FP | on, report |
-| Dylib injection | `DYLD_INSERT_LIBRARIES` env | weak | on, report |
-| Signature self-check | `SecStaticCode` + Team ID | high (signed only) | on, report |
-| Mach-O section hash | `getsegmentdata` + SHA-256 vs baseline | fragile | **off** |
+| Detector | Policy toggle | Mechanism | Confidence | Default |
+|---|---|---|---|---|
+| Debugger | `checkDebugger` | sysctl `P_TRACED` | high | on, report |
+| `PT_DENY_ATTACH` | `enablePtraceDenyAttach` | `ptrace(31)` | prevention | **off** |
+| Instrumentation image | `checkInstrumentationImages` | `_dyld_*` image enum vs basename markers | high-FP | on, report |
+| Instrumentation thread | `checkInstrumentationThreads` | `task_threads` + `pthread_getname_np` | high-FP | on, report |
+| Unexpected image | `checkUnexpectedImages` | realpath diff vs system/bundle/allowlist | high-FP | on, report |
+| Dylib injection | `checkDylibInjection` | `DYLD_INSERT_LIBRARIES` env | specific-but-weak | on, report |
+| Signature self-check | `checkSignature` | `SecStaticCode` + Team ID / requirement | high only if pinned | on, report |
 
-### Correctness notes (folded in from review)
+The unexpected-image check is the noisiest, so it has its own toggle: disable
+`checkUnexpectedImages` independently while keeping the instrumentation-marker checks.
+
+### Correctness notes
 
 - `PT_DENY_ATTACH` = 31; SIGSEGVs if a debugger is already attached. Forfeits crash telemetry, risks
-  notarization analysis. Opt-in within opt-in.
+  notarization analysis. Opt-in within opt-in, applied at most once per process, and gated
+  independently of `checkDebugger`.
+- Instrumentation markers match the image **basename's** tokens, never a substring of the full path,
+  so `libswiftArgumentParser.dylib` is not flagged by `gum` inside "argument".
 - Thread-name scan is more reliable than image-name scan, but `task_threads` leaks unless every port
   is `mach_port_deallocate`'d and the array `vm_deallocate`'d — done in `Detectors.threadNames()`.
-- Signature check treats `errSecCSUnsigned` as "not meaningful here" (debug/ad-hoc), not a failure.
-- Hash only `__TEXT` / `__DATA_CONST` — stable, read-only under signing.
-- `DYLD_INSERT_LIBRARIES` is stripped under the hardened runtime, so that detector is weak.
+- Unexpected-image comparison resolves `realpath(3)` so `/var` vs `/private/var` and symlinks do not
+  produce phantom mismatches, and exempts the main bundle's own `Contents/` subtree.
+- Signature check treats `errSecCSUnsigned` as "not meaningful here" (debug/ad-hoc), *unless* a Team
+  ID or designated requirement is pinned, which an unsigned binary cannot satisfy. With neither
+  pinned it only proves "signed and unmodified vs its own signature" — a re-sign passes.
+- `DYLD_INSERT_LIBRARIES` is stripped under the hardened runtime, so that detector is weak (its
+  absence proves nothing), but it is specific: benign apps rarely set it, so it is not high-FP.
 
 ## Safety model
 
-- Response defaults to `.report`. `.terminate` is opt-in and gated: `Shield.apply` terminates only
-  when `detections.contains { !$0.isHighFalsePositive }`. A set of only name/thread/env signals can
-  never brick a user.
+- Response defaults to `.report`. `.terminate` is opt-in and gated via `Shield.shouldTerminate`,
+  which terminates (with `abort()`) only when `detections.contains { !$0.isHighFalsePositive }`. A
+  set of only name/thread/image signals can never brick a user.
 - `Detection.isHighFalsePositive` is the single source of truth for that gate and is unit-tested.
+  "High-FP" means "fires on benign apps" (name/thread/unexpected-image), not "easy to evade".
+- A library killing its host process is drastic: prefer `.report`/`.callback` and enforce on a
+  server you control.
 
 ## Build hardening
 
@@ -63,5 +75,9 @@ build-breaking surface and is treated as future work, not polish.
 
 ## Phase 2
 
-Wrap (not rebuild) a maintained LLVM obfuscator (e.g. Obscura) after a licence audit; `harden`
-project integration.
+- Wrap (not rebuild) a maintained LLVM obfuscator (e.g. Obscura) after a licence audit; `harden`
+  project integration.
+- **Mach-O section hashing** (dropped from v1). Hashing a `__TEXT`/`__DATA_CONST` section and
+  comparing against a baked baseline needs a baseline generator plus a post-link patch step to write
+  the expected digest after the hash sites are compiled; without that the baseline is self-referential
+  and the detector is unusable. Not shipped. Phase 2 would add the generator and the patch step.
