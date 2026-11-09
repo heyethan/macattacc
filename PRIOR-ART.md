@@ -1,14 +1,15 @@
 # Prior art and clean-room statement
 
-This document is committed **before any implementation code** in this repository, as a record of
-how `macattacc` was built and what it is (and is not) derived from.
+This document records how `macattacc` was built and what it is (and is not) derived from.
 
-## Clean-room process
+## Clean-room attestation (2026-11-08)
 
-Every technique in this toolkit was rebuilt from scratch in fresh Swift and C. While writing the
-code, **no source code from GPL-licensed or unlicensed protection projects was opened, read, or
-copied.** The APIs used here are public Apple system interfaces; the authoritative sources consulted
-were Apple's own headers and manual pages, not third-party implementations:
+Every technique here was reimplemented from Apple headers and man pages
+(`sys/ptrace.h`, `sys/sysctl.h`, `mach-o/dyld.h`, `Security.framework`). **No source from
+GPL-licensed (SwiftShield) or unlicensed (Hikari, SwiftyShield) repositories was copied or
+consulted while writing the implementation.** The APIs used here are public Apple system
+interfaces; the authoritative sources consulted were Apple's own headers and manual pages, not
+third-party implementations:
 
 - `ptrace(2)` and `PT_DENY_ATTACH` — `<sys/ptrace.h>`, `man 2 ptrace`
 - `sysctl(3)` with `KERN_PROC_PID` and the `kinfo_proc` / `extern_proc` layout, and the `P_TRACED`
