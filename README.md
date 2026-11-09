@@ -50,8 +50,11 @@ swift run shield harden /path/to/your/project
 
 Writes `Shield.xcconfig` with the presets (`STRIP_STYLE=all`, `STRIP_INSTALLED_PRODUCT`,
 `DEAD_CODE_STRIPPING`, `DEPLOYMENT_POSTPROCESSING`, `SWIFT_REFLECTION_METADATA_LEVEL=without-names`)
-and prints how to adopt it. It does not touch your `.xcodeproj`; you include the xcconfig on your
-Release configuration.
+and prints how to adopt it. By default it does not touch your `.xcodeproj`; you include the xcconfig
+on your Release configuration. Pass `--write-project` to opt in to wiring the single `.xcodeproj` in
+the directory automatically — it sets the app target's Release `baseConfigurationReference`, after a
+timestamped `project.pbxproj` backup, and refuses rather than guess if it can't find exactly one app
+target or the config is already set. No other target is touched.
 
 ### 1b. Obfuscate string literals (the anti-scrape layer)
 

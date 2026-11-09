@@ -1,0 +1,94 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXFileReference section */
+		AA00000000000000000000B1 /* SampleApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SampleApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FF00000000000000000000B1 /* SampleKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = SampleKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXNativeTarget section */
+		AA00000000000000000000A1 /* SampleApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00000000000000000000C0 /* Build configuration list for PBXNativeTarget "SampleApp" */;
+			buildPhases = (
+			);
+			dependencies = (
+			);
+			name = SampleApp;
+			productName = SampleApp;
+			productReference = AA00000000000000000000B1 /* SampleApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		FF00000000000000000000A1 /* SampleKit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FF00000000000000000000C0 /* Build configuration list for PBXNativeTarget "SampleKit" */;
+			buildPhases = (
+			);
+			dependencies = (
+			);
+			name = SampleKit;
+			productName = SampleKit;
+			productReference = FF00000000000000000000B1 /* SampleKit.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin XCBuildConfiguration section */
+		AA00000000000000000000D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.SampleApp;
+			};
+			name = Debug;
+		};
+		AA00000000000000000000E1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.SampleApp;
+			};
+			name = Release;
+		};
+		FF00000000000000000000D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.SampleKit;
+			};
+			name = Debug;
+		};
+		FF00000000000000000000E1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.SampleKit;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA00000000000000000000C0 /* Build configuration list for PBXNativeTarget "SampleApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA00000000000000000000D1 /* Debug */,
+				AA00000000000000000000E1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FF00000000000000000000C0 /* Build configuration list for PBXNativeTarget "SampleKit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FF00000000000000000000D1 /* Debug */,
+				FF00000000000000000000E1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AA00000000000000000000FF /* Project object */;
+}

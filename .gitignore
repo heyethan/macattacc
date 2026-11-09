@@ -1,3 +1,6 @@
 .build/
 .swiftpm/
 *.xcodeproj
+# ...except the test fixture project (needed by the pbxproj-wiring tests).
+!Tests/Fixtures/SampleApp.xcodeproj/
+!Tests/Fixtures/SampleApp.xcodeproj/project.pbxproj

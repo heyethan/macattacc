@@ -20,8 +20,9 @@ Both must pass. Tests are pure logic and need no debugger or Frida present.
 
 ## Do
 
-- Run `swift run shield harden <dir>` to produce `Shield.xcconfig`; explain the user must include it
-  on their Release config themselves. Do **not** edit their `.xcodeproj`.
+- Run `swift run shield harden <dir>` to produce `Shield.xcconfig`; by default the user includes it
+  on their Release config themselves. `--write-project` opts in to wiring the single `.xcodeproj`'s
+  app-target Release config automatically (timestamped backup first; refuses on anything ambiguous).
 - Default `ShieldPolicy.onDetection` to `.report`. Act only on `!detection.isHighFalsePositive`.
 - Tell the user plainly: runtime self-checks are defense-in-depth against dynamic tampering, not a
   wall against cloning, and an attacker/LLM can NOP the branch.

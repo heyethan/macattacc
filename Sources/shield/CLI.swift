@@ -93,7 +93,7 @@ struct Doctor: ParsableCommand {
 
 struct Harden: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Write Shield.xcconfig with proven build-hardening presets. Does NOT touch your .xcodeproj."
+        abstract: "Write Shield.xcconfig with proven build-hardening presets. Leaves your .xcodeproj alone unless you pass --write-project."
     )
 
     @Argument(help: "Directory to write Shield.xcconfig into.")
@@ -101,6 +101,9 @@ struct Harden: ParsableCommand {
 
     @Flag(help: "Overwrite an existing Shield.xcconfig.")
     var force = false
+
+    @Flag(help: "Also wire Shield.xcconfig into the single .xcodeproj in DIRECTORY (app target's Release config). Off by default.")
+    var writeProject = false
 
     func run() throws {
         let dir = URL(fileURLWithPath: directory, isDirectory: true)
@@ -118,12 +121,16 @@ struct Harden: ParsableCommand {
             throw ExitCode.failure
         }
         try Self.xcconfig.write(to: dest, atomically: true, encoding: .utf8)
+        print("Wrote \(dest.path)\n")
+
+        if writeProject {
+            try Self.wireProject(in: dir, xcconfigName: "Shield.xcconfig")
+            return
+        }
 
         print("""
-        Wrote \(dest.path)
-
-        This file was NOT applied to any Xcode project (that is the riskiest, build-breaking
-        surface — v1 leaves it to you). To use it:
+        This file was NOT applied to any Xcode project. To use it, either re-run with
+        --write-project (wires the single .xcodeproj here automatically), or by hand:
 
           1. In Xcode: Project editor > Info tab > Configurations > expand Release, and set
              your APPLICATION target's row (not the project row, not a framework) to
@@ -132,6 +139,47 @@ struct Harden: ParsableCommand {
              signature and your build; never set these project-wide.
           3. These settings raise the STATIC / clone bar (strip symbols + reflection
              metadata). The runtime library is separate defense-in-depth.
+        """)
+    }
+
+    /// Wire Shield.xcconfig into the one `.xcodeproj` in `dir` by setting the single app
+    /// target's Release `baseConfigurationReference`. Backs up project.pbxproj first; refuses
+    /// (clearly, non-destructively) on anything ambiguous.
+    static func wireProject(in dir: URL, xcconfigName: String) throws {
+        let fm = FileManager.default
+        let projects = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension == "xcodeproj" } ?? []
+        guard projects.count == 1 else {
+            print("REFUSED  expected exactly one .xcodeproj in \(dir.path), found \(projects.count). Shield.xcconfig is written; wire it by hand.")
+            throw ExitCode.failure
+        }
+        let pbxproj = projects[0].appendingPathComponent("project.pbxproj")
+        guard let text = try? String(contentsOf: pbxproj, encoding: .utf8) else {
+            print("REFUSED  cannot read \(pbxproj.path). Shield.xcconfig is written; wire it by hand.")
+            throw ExitCode.failure
+        }
+
+        let guid = PBXProjectWiring.freshGUID(notIn: text)
+        let updated: String
+        do {
+            updated = try PBXProjectWiring.wire(pbxproj: text, xcconfigName: xcconfigName, guid: guid)
+        } catch let e as PBXProjectWiring.WireError {
+            print("REFUSED  \(e). Nothing was changed; Shield.xcconfig is written, wire it by hand.")
+            throw ExitCode.failure
+        }
+
+        // Timestamped backup before the one write.
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let backup = pbxproj.deletingLastPathComponent()
+            .appendingPathComponent("project.pbxproj.backup-\(stamp)")
+        try fm.copyItem(at: pbxproj, to: backup)
+        try updated.write(to: pbxproj, atomically: true, encoding: .utf8)
+
+        print("""
+        Wired Shield.xcconfig into \(projects[0].lastPathComponent) (app target's Release config).
+        Backup: \(backup.path)
+        Only the app target's Release baseConfigurationReference was set — no other target touched.
+        Open the project in Xcode to confirm, then build Release.
         """)
     }
 
