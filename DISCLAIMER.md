@@ -1,6 +1,6 @@
-# Disclaimer — defensive use only
+# Disclaimer: defensive use only
 
-`macos-shield` is a tool for **developers protecting software they own.** It is meant to raise the
+`macattacc` is a tool for **developers protecting software they own.** It is meant to raise the
 cost of cracking a licence, tampering with a running app, or lifting your code — on *your* binary.
 
 ## Permitted

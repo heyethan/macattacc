@@ -57,11 +57,11 @@ syscall. We say so everywhere. The runtime half is never labelled anti-clone.
 
 ## Build hardening
 
-`shield harden` writes `Shield.xcconfig` (the presets Geass proved) and prints adoption steps. v1
+`shield harden` writes `Shield.xcconfig` (the standard Release hardening presets) and prints adoption steps. v1
 deliberately does **not** mutate a user's `.xcodeproj` — auto-editing project files is the riskiest,
 build-breaking surface and is treated as future work, not polish.
 
 ## Phase 2
 
 Wrap (not rebuild) a maintained LLVM obfuscator (e.g. Obscura) after a licence audit; `harden`
-project integration; Geass dogfood.
+project integration.

@@ -1,9 +1,9 @@
 ---
-name: macos-shield
+name: macattacc
 description: Harden and self-protect a macOS app the user owns. Use when the user wants to strip/obfuscate a Swift/macOS binary against cloning, or add runtime tamper/debugger/instrumentation detection to their own app. Writes a build-hardening xcconfig and scans a process or app bundle. Defensive, for software the user owns.
 ---
 
-# macos-shield
+# macattacc
 
 Protect a macOS app **the user owns**. Two halves, different jobs — be honest about which:
 
@@ -17,7 +17,7 @@ Never tell the user runtime checks stop cloning. Never enable a destructive resp
 ## Build and verify
 
 ```sh
-cd macos-shield
+cd macattacc
 swift build          # must succeed
 swift test           # must be green (pure logic; no debugger/Frida needed)
 ```

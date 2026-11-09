@@ -1,7 +1,7 @@
 # Prior art and clean-room statement
 
 This document is committed **before any implementation code** in this repository, as a record of
-how `macos-shield` was built and what it is (and is not) derived from.
+how `macattacc` was built and what it is (and is not) derived from.
 
 ## Clean-room process
 
