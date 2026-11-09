@@ -27,16 +27,15 @@ public enum Heuristics {
         "gum-js-loop", "gmain", "gdbus", "pool-frida", "frida",
     ]
 
-    /// Split an image path's basename into lowercased tokens, breaking on non-alphanumeric
-    /// separators (`.`, `-`, `_`) and camelCase boundaries. `FridaGadget.dylib` →
-    /// `["frida", "gadget", "dylib"]`; `libswiftArgumentParser.dylib` →
-    /// `["libswift", "argument", "parser", "dylib"]`.
-    static func imageBasenameTokens(_ path: String) -> [String] {
-        let base = (path as NSString).lastPathComponent
+    /// Split a string into lowercased tokens, breaking on non-alphanumeric separators
+    /// (`.`, `-`, `_`, space) and camelCase boundaries. `FridaGadget.dylib` →
+    /// `["frida", "gadget", "dylib"]`; `gum-js-loop` → `["gum", "js", "loop"]`;
+    /// `diagmaintenance` → `["diagmaintenance"]` (one token — does not contain "gmain").
+    static func tokenize(_ s: String) -> [String] {
         var tokens: [String] = []
         var current = ""
         var prevIsLower = false
-        for ch in base {
+        for ch in s {
             if ch.isLetter || ch.isNumber {
                 if ch.isUppercase, prevIsLower, !current.isEmpty {
                     tokens.append(current)
@@ -53,6 +52,11 @@ public enum Heuristics {
         return tokens.map { $0.lowercased() }
     }
 
+    /// Lowercased tokens of a path's basename (not the whole path).
+    static func imageBasenameTokens(_ path: String) -> [String] {
+        tokenize((path as NSString).lastPathComponent)
+    }
+
     public static func matchesInstrumentationImage(_ path: String) -> Bool {
         // Match a marker only if it equals a whole basename token, or a token with a
         // leading "lib" stripped (so `libsubstrate` → `substrate`). Never a loose substring.
@@ -66,8 +70,15 @@ public enum Heuristics {
     }
 
     public static func matchesInstrumentationThread(_ name: String) -> Bool {
+        // Token-anchored, the same way the image matcher is: a marker matches only if it
+        // equals the whole (lowercased) name or a whole token of it — never a loose
+        // substring, so "gmain" no longer fires on "diagmaintenance" and "mainThread" is
+        // not flagged. Multi-token markers (`gum-js-loop`, `pool-frida`) match by exact
+        // name equality; single-token markers (`gmain`, `frida`) match a token too.
         let lower = name.lowercased()
-        return instrumentationThreadMarkers.contains { lower == $0 || lower.contains($0) }
+        if instrumentationThreadMarkers.contains(lower) { return true }
+        let tokens = Set(tokenize(name))
+        return instrumentationThreadMarkers.contains { tokens.contains($0) }
     }
 
     /// Paths rooted here are OS-shipped and always considered expected.

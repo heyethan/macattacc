@@ -1,5 +1,6 @@
 import XCTest
 import os
+import Security
 @testable import MacOSShield
 
 final class HeuristicsTests: XCTestCase {
@@ -52,6 +53,16 @@ final class HeuristicsTests: XCTestCase {
     func testInstrumentationThreadIgnoresBenign() {
         XCTAssertFalse(Heuristics.matchesInstrumentationThread("com.apple.NSEventThread"))
         XCTAssertFalse(Heuristics.matchesInstrumentationThread(""))
+    }
+
+    // Regression: the old loose `contains` match flagged "diagmaintenance" because it
+    // contains "gmain". Token-anchored matching must flag whole-token markers only.
+    func testInstrumentationThreadIsTokenAnchored() {
+        XCTAssertTrue(Heuristics.matchesInstrumentationThread("gmain"))
+        XCTAssertTrue(Heuristics.matchesInstrumentationThread("gum-js-loop"))
+        XCTAssertTrue(Heuristics.matchesInstrumentationThread("pool-frida-1")) // "frida" is a whole token
+        XCTAssertFalse(Heuristics.matchesInstrumentationThread("diagmaintenance")) // not a token
+        XCTAssertFalse(Heuristics.matchesInstrumentationThread("mainThread"))      // camelCase → main, thread
     }
 
     // MARK: allowlist diff
@@ -129,6 +140,14 @@ final class HeuristicsTests: XCTestCase {
     func testSignatureInvalidStatus() {
         let d = Heuristics.mapSignatureStatus(status: -1, expectedTeamID: nil, actualTeamID: nil)
         XCTAssertEqual(d, .signatureInvalid(reason: "SecStaticCodeCheckValidity status -1"))
+    }
+
+    // The CLI `check` and the library self-check must share ONE hardened flag set:
+    // strict + all-architectures + nested-code. A regression that weakened this (e.g. back to
+    // bare `SecCSFlags()`) would change this raw value.
+    func testHardenedSignatureFlagsAreStrict() {
+        let expected = kSecCSCheckAllArchitectures | kSecCSCheckNestedCode | kSecCSStrictValidate
+        XCTAssertEqual(SignatureCheck.hardenedFlags.rawValue, expected)
     }
 }
 
