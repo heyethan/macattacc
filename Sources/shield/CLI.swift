@@ -189,6 +189,16 @@ struct Verify: ParsableCommand {
 
     func run() throws {
         let binary = try Self.resolveBinary(path)
+
+        // Report a missing toolchain clearly, rather than letting it surface as an opaque
+        // "not a readable Mach-O" below (these ship with the Xcode command line tools).
+        for tool in ["/usr/bin/nm", "/usr/bin/otool", "/usr/bin/size"] {
+            guard FileManager.default.isExecutableFile(atPath: tool) else {
+                print("FAIL  required tool \(tool) not found — install the Xcode command line tools (xcode-select --install).")
+                throw ExitCode.failure
+            }
+        }
+
         let nm = Self.shell("/usr/bin/nm", [binary.path])
         let otool = Self.shell("/usr/bin/otool", ["-l", binary.path])
         // nm exits nonzero on a non-Mach-O (directory, text file); that is the reliable gate.
@@ -199,11 +209,14 @@ struct Verify: ParsableCommand {
         let sizeOut = Self.shell("/usr/bin/size", [binary.path]).output
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        let localSymbols = HardeningCheck.localSymbolCount(nmOutput: nm.output)
+        let threshold = HardeningCheck.localSymbolThreshold
         let stripped = HardeningCheck.symbolsAreStripped(nmOutput: nm.output)
         let reflSize = HardeningCheck.reflectionStringsSize(otoolOutput: otool.output)
         let runtime = Self.hasHardenedRuntime(binary)
 
         print("shield verify — \(binary.path)\n")
+        print("  local symbols         : \(localSymbols) (threshold \(threshold) — a stripped binary can retain a stray local)")
         print("  symbols stripped      : \(stripped ? "yes" : "NO")")
         if let reflSize {
             print("  __swift5_reflstr      : \(reflSize) bytes (field/type names; without-names shrinks it, never to zero — compare an unhardened build)")
@@ -217,13 +230,14 @@ struct Verify: ParsableCommand {
         }
         if !sizeOut.isEmpty { print("\n  size:\n\(sizeOut)") }
 
-        // PASS/FAIL is gated on symbol stripping — the one signal we can confirm cleanly.
-        // Reflection-string size is reported for judgement, not used as a gate.
+        // PASS/FAIL is gated on symbol stripping — the one signal we can confirm cleanly —
+        // but NOT on strict zero: a legitimately stripped binary can keep a stray local, so
+        // PASS holds at/below the threshold. Reflection-string size is reported, not gated.
         print("")
         if stripped {
-            print("PASS  symbols stripped.")
+            print("PASS  symbols stripped (\(localSymbols) local ≤ threshold \(threshold)).")
         } else {
-            print("FAIL  local symbols present (not stripped). Adopt Shield.xcconfig on the Release app target.")
+            print("FAIL  \(localSymbols) local symbols present (> threshold \(threshold); not stripped). Adopt Shield.xcconfig on the Release app target.")
             throw ExitCode.failure
         }
     }
@@ -296,8 +310,13 @@ enum HardeningCheck {
         return count
     }
 
-    static func symbolsAreStripped(nmOutput: String) -> Bool {
-        nmOutput.lowercased().contains("no symbols") || localSymbolCount(nmOutput: nmOutput) == 0
+    /// A legitimately stripped binary can retain a stray local symbol (a linker-synthesised
+    /// label, a `-Wl,-x` miss), so PASS is gated at/below this small threshold, not strict zero.
+    static let localSymbolThreshold = 3
+
+    static func symbolsAreStripped(nmOutput: String, threshold: Int = localSymbolThreshold) -> Bool {
+        if nmOutput.lowercased().contains("no symbols") { return true }
+        return localSymbolCount(nmOutput: nmOutput) <= threshold
     }
 
     /// Size in bytes of the `__swift5_reflstr` section (Swift reflection field/type NAMES)

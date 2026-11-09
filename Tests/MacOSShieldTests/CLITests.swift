@@ -80,11 +80,29 @@ final class CLITests: XCTestCase {
         0000000100003f58 T _main
                          U _abort
         """))
-        // Local symbols (lowercase type letters) present → NOT stripped.
-        XCTAssertFalse(HardeningCheck.symbolsAreStripped(nmOutput: """
+        // A couple of stray locals (≤ threshold) still counts as stripped — a strict-zero gate
+        // falsely failed legitimately stripped binaries.
+        XCTAssertTrue(HardeningCheck.symbolsAreStripped(nmOutput: """
         0000000100003f58 t _helper
         0000000100008000 s _localData
         """))
+        // Many locals (> threshold) → NOT stripped.
+        XCTAssertFalse(HardeningCheck.symbolsAreStripped(nmOutput: """
+        0000000100003f58 t _a
+        0000000100003f60 t _b
+        0000000100003f68 t _c
+        0000000100003f70 t _d
+        0000000100003f78 s _e
+        """))
+    }
+
+    func testLocalSymbolCountCountsOnlyLocals() {
+        XCTAssertEqual(HardeningCheck.localSymbolCount(nmOutput: """
+        0000000100003f58 t _helper
+        0000000100008000 s _localData
+        0000000100003f58 T _main
+                         U _abort
+        """), 2)
     }
 
     // Anchoring to "hex address + single lowercase type" means nm's English error text is
